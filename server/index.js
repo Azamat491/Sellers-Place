@@ -111,6 +111,18 @@ api.post('/listings', upload.array('photos', config.maxPhotos), async (req, res)
     .prepare(`SELECT COUNT(*) c FROM listings WHERE user_id = ? AND created_at > datetime('now','-1 day')`)
     .get(req.user.id).c;
   if (pendingToday >= 10 && !req.isAdmin) errors.push('Не больше 10 объявлений в сутки');
+  // п. 5 правил: без рекламы сторонних проектов — ссылки и @упоминания в описании запрещены
+  if (/(https?:\/\/|t\.me\/|www\.|@[a-z0-9_]{4,})/i.test(`${b.description || ''} ${b.model || ''}`)) {
+    errors.push('Уберите ссылки и @упоминания из описания — реклама сторонних проектов запрещена (п. 5)');
+  }
+  // п. 6 правил: одну и ту же вещь — не чаще раза в 3 недели
+  if (kind === 'sell' && !req.isAdmin) {
+    const dup = db.prepare(
+      `SELECT 1 FROM listings WHERE user_id = ? AND kind = 'sell' AND lower(brand) = lower(?) AND lower(model) = lower(?)
+         AND status IN ('pending','published','sold','archived') AND created_at > datetime('now','-21 days')`
+    ).get(req.user.id, str(b.brand, 60), str(b.model, 120));
+    if (dup) errors.push('Эту вещь можно предложить повторно не раньше, чем через 3 недели (п. 6)');
+  }
   if (errors.length) { cleanup(); return res.status(400).json({ error: errors.join('\n') }); }
 
   let delivery = [];
