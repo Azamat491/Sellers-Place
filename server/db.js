@@ -4,6 +4,7 @@ import path from 'node:path';
 import { config } from './config.js';
 
 fs.mkdirSync(path.join(config.dataDir, 'uploads'), { recursive: true });
+fs.mkdirSync(path.join(config.dataDir, 'receipts'), { recursive: true });
 
 export const db = new DatabaseSync(path.join(config.dataDir, 'sellersplace.db'));
 
@@ -34,8 +35,8 @@ CREATE TABLE IF NOT EXISTS listings (
   garant INTEGER NOT NULL DEFAULT 1,
   description TEXT NOT NULL DEFAULT '',
   photos TEXT NOT NULL DEFAULT '[]',
-  status TEXT NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('pending','published','rejected','sold','archived')),
+  -- awaiting_payment → pending → published / rejected; published → sold / archived
+  status TEXT NOT NULL DEFAULT 'pending',
   reject_reason TEXT,
   channel_message_ids TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -50,6 +51,12 @@ CREATE TABLE IF NOT EXISTS favorites (
   PRIMARY KEY (user_id, listing_id)
 );
 `);
+
+// Миграции: добавляем колонки, если их нет
+const cols = db.prepare('PRAGMA table_info(listings)').all().map((c) => c.name);
+for (const [name, def] of [['amount', 'INTEGER'], ['receipt', 'TEXT'], ['paid_at', 'TEXT']]) {
+  if (!cols.includes(name)) db.exec(`ALTER TABLE listings ADD COLUMN ${name} ${def}`);
+}
 
 const JSON_FIELDS = ['delivery', 'photos', 'channel_message_ids'];
 const BOOL_FIELDS = ['negotiable', 'exchange', 'meetup', 'garant'];

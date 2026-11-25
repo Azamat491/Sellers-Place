@@ -15,6 +15,7 @@ import {
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const uploadsDir = path.join(config.dataDir, 'uploads');
+const receiptsDir = path.join(config.dataDir, 'receipts'); // чеки не раздаются публично
 const app = express();
 app.use(express.json({ limit: '100kb' }));
 app.use(express.static(path.join(root, 'public')));
@@ -32,6 +33,16 @@ const upload = multer({
   fileFilter: (_req, file, cb) => cb(null, ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)),
 });
 
+// Чеки об оплате — отдельно и без публичного доступа
+const receiptUpload = multer({
+  storage: multer.diskStorage({
+    destination: receiptsDir,
+    filename: (_req, file, cb) => cb(null, crypto.randomBytes(12).toString('hex') + (file.mimetype === 'image/png' ? '.png' : '.jpg')),
+  }),
+  limits: { files: 1, fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => cb(null, ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)),
+});
+
 const api = express.Router();
 api.use(authMiddleware);
 
@@ -39,6 +50,8 @@ const publicView = (l, userId) =>
   l && {
     ...l,
     channel_message_ids: undefined,
+    receipt: undefined,
+    has_receipt: !!l.receipt,
     post_url: channelPostUrl(l.channel_message_ids?.[0]),
     is_mine: l.user_id === userId,
     is_favorite: !!db.prepare('SELECT 1 FROM favorites WHERE user_id = ? AND listing_id = ?').get(userId, l.id),
@@ -59,6 +72,9 @@ api.get('/meta', (req, res) => {
     garantContact: config.garantContact,
     maxPhotos: config.maxPhotos,
     autoPublish: config.autoPublish,
+    payment: config.postPrice > 0
+      ? { amount: config.postPrice, card: config.paymentCard, bank: config.paymentBank, holder: config.paymentHolder }
+      : null,
   });
 });
 
@@ -116,7 +132,8 @@ api.post('/listings', upload.array('photos', config.maxPhotos), async (req, res)
     errors.push('Уберите ссылки и @упоминания из описания — реклама сторонних проектов запрещена (п. 5)');
   }
   // п. 6 правил: одну и ту же вещь — не чаще раза в 3 недели
-  if (kind === 'sell' && !req.isAdmin) {
+  // Платные посты — исключение из п. 6
+  if (kind === 'sell' && !req.isAdmin && !config.postPrice) {
     const dup = db.prepare(
       `SELECT 1 FROM listings WHERE user_id = ? AND kind = 'sell' AND lower(brand) = lower(?) AND lower(model) = lower(?)
          AND status IN ('pending','published','sold','archived') AND created_at > datetime('now','-21 days')`
@@ -140,6 +157,11 @@ api.post('/listings', upload.array('photos', config.maxPhotos), async (req, res)
     str(b.description, 700), JSON.stringify(photos)
   );
   const id = Number(info.lastInsertRowid);
+  if (config.postPrice > 0 && !req.isAdmin) {
+    // Сначала оплата: объявление ждёт чек и только потом уходит модераторам
+    setStatus(id, 'awaiting_payment', { amount: config.postPrice });
+    return res.json(publicView(getListing(id), req.user.id));
+  }
   try {
     if (config.autoPublish) await approveListing(id);
     else await sendToModeration(getListing(id));
@@ -147,6 +169,22 @@ api.post('/listings', upload.array('photos', config.maxPhotos), async (req, res)
     console.error('publish/moderation error', e);
   }
   res.json(publicView(getListing(id), req.user.id));
+});
+
+api.post('/listings/:id/receipt', receiptUpload.single('receipt'), async (req, res) => {
+  const l = getListing(Number(req.params.id));
+  const drop = () => req.file && fs.rm(req.file.path, () => {});
+  if (!l || l.user_id !== req.user.id) { drop(); return res.status(404).json({ error: 'Объявление не найдено' }); }
+  if (l.status !== 'awaiting_payment') { drop(); return res.status(400).json({ error: 'Это объявление уже оплачено' }); }
+  if (!req.file) return res.status(400).json({ error: 'Прикрепите скриншот чека' });
+  const out = setStatus(l.id, 'pending', { receipt: req.file.filename, reject_reason: null });
+  try {
+    if (config.autoPublish) await approveListing(l.id);
+    else await sendToModeration(out);
+  } catch (e) {
+    console.error('moderation error', e);
+  }
+  res.json(publicView(getListing(l.id), req.user.id));
 });
 
 api.get('/my', (req, res) => {
@@ -212,8 +250,15 @@ api.post('/admin/:id/approve', adminOnly, async (req, res) => {
   }
 });
 
+api.get('/admin/receipt/:id', adminOnly, (req, res) => {
+  const l = getListing(Number(req.params.id));
+  if (!l?.receipt) return res.status(404).json({ error: 'Чека нет' });
+  res.sendFile(path.resolve(receiptsDir, path.basename(l.receipt)));
+});
+
 api.post('/admin/:id/reject', adminOnly, async (req, res) => {
-  res.json(publicView(await rejectListing(Number(req.params.id), str(req.body?.reason, 300)), req.user.id));
+  const backToPayment = req.body?.nopay === true;
+  res.json(publicView(await rejectListing(Number(req.params.id), str(req.body?.reason, 300), { backToPayment }), req.user.id));
 });
 
 app.use('/api', api);

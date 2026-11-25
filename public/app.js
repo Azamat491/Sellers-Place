@@ -11,6 +11,7 @@ const haptic = (t = 'light') => tg?.HapticFeedback?.impactOccurred(t);
 const photoUrl = (p) => `/uploads/${encodeURIComponent(p)}`;
 
 let META = null;
+let navSeq = 0; // растёт при каждой навигации — отсекает устаревшие асинхронные рендеры
 const state = { tab: 'feed', stack: [], filters: { q: '', category: '', size: '', city: '', min: '', max: '', sort: 'new' } };
 
 // ---------- API ----------
@@ -48,6 +49,7 @@ function confirmDialog(text) {
 const TABS = { feed: renderFeed, wtb: renderWtb, create: renderCreate, favorites: renderFavorites, profile: renderProfile };
 
 function go(tab) {
+  navSeq++;
   state.tab = tab;
   state.stack = [];
   document.querySelectorAll('.tabbar button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
@@ -57,6 +59,7 @@ function go(tab) {
 }
 
 function push(render) {
+  navSeq++;
   state.stack.push({ render, scroll: window.scrollY });
   updateBack();
   window.scrollTo(0, 0);
@@ -64,6 +67,7 @@ function push(render) {
 }
 
 function back() {
+  navSeq++;
   state.stack.pop();
   updateBack();
   const top = state.stack[state.stack.length - 1];
@@ -84,6 +88,7 @@ document.querySelectorAll('.tabbar button').forEach((b) => (b.onclick = () => (h
 
 // ---------- Карточки ----------
 const STATUS = {
+  awaiting_payment: ['Ждёт оплаты', 'warn'],
   pending: ['На модерации', 'warn'],
   published: ['Опубликовано', 'ok'],
   rejected: ['Отклонено', 'bad'],
@@ -208,13 +213,15 @@ async function renderWtb() {
     <div id="list">${skeletons(2)}</div>`;
   $('#newWtb').onclick = () => (go('create'), setTimeout(() => $('[data-kind="wtb"]')?.click()));
   try {
+    const holder = $('#list');
     const items = await api('/listings?kind=wtb');
+    if (!holder.isConnected) return;
     $('#list').innerHTML = items.length
       ? items.map(rowHtml).join('')
       : `<div class="empty"><b>🔎</b>Пока нет запросов</div>`;
     bindCards($('#list'));
   } catch (e) {
-    $('#list').innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    if ($('#list')) $('#list').innerHTML = `<div class="empty">${esc(e.message)}</div>`;
   }
 }
 
@@ -236,9 +243,11 @@ function rowHtml(l, actions = '') {
 // ---------- Карточка товара ----------
 async function renderDetail(id) {
   view.innerHTML = skeletons(1);
+  const seq = navSeq;
   let l;
   try {
     l = await api(`/listings/${id}`);
+    if (seq !== navSeq) return; // пользователь уже ушёл на другой экран
   } catch (e) {
     view.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
     return;
@@ -340,9 +349,10 @@ function renderCreate() {
       </div>
       <h3>Так пост будет выглядеть в канале</h3>
       <div class="preview" id="preview"></div>
+      ${META.payment ? `<div class="notice">Размещение — <b>${price(META.payment.amount)}</b> за вещь. На следующем шаге — реквизиты для перевода и загрузка чека.</div>` : ''}
       <p class="small muted">${META.autoPublish ? 'Объявление будет опубликовано сразу.' : 'Перед публикацией объявление проверит модератор. Мы пришлём уведомление в бота.'}
         Публикуя, вы соглашаетесь с <a href="#" id="toRules">правилами площадки</a>.</p>
-      <button class="btn" type="submit" id="submit">Отправить на публикацию</button>
+      <button class="btn" type="submit" id="submit">${submitLabel()}</button>
     </form>`;
 
   view.querySelectorAll('[data-kind]').forEach(
@@ -401,13 +411,109 @@ function renderCreate() {
       tg?.HapticFeedback?.notificationOccurred('success');
       draft.photos.forEach((p) => URL.revokeObjectURL(p.url));
       draft.photos = [];
+      if (l.status === 'awaiting_payment') {
+        go('profile');
+        push(() => renderPayment(l.id));
+        return;
+      }
       toast(l.status === 'published' ? 'Опубликовано в канале!' : 'Отправлено на модерацию. Мы сообщим о публикации в боте.');
       go('profile');
     } catch (err) {
       tg?.HapticFeedback?.notificationOccurred('error');
       toast(err.message, 4000);
       btn.disabled = false;
-      btn.textContent = 'Отправить на публикацию';
+      btn.textContent = submitLabel();
+    }
+  };
+}
+
+function submitLabel() {
+  return META.payment && !META.isAdmin ? `Далее — оплата ${price(META.payment.amount)}` : 'Отправить на публикацию';
+}
+
+// ---------- Оплата ----------
+async function renderPayment(id) {
+  view.innerHTML = skeletons(1);
+  const seq = navSeq;
+  let l;
+  try {
+    l = await api(`/listings/${id}`);
+    if (seq !== navSeq) return; // пользователь уже ушёл на другой экран
+  } catch (e) {
+    view.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    return;
+  }
+  if (l.status !== 'awaiting_payment') {
+    view.innerHTML = `<div class="empty"><b>✓</b>Объявление уже оплачено</div>`;
+    return;
+  }
+  const p = META.payment;
+  const card = (p.card || '').replace(/\s+/g, '');
+  const cardPretty = card.replace(/(\d{4})(?=\d)/g, '$1 ');
+  view.innerHTML = `
+    <h2>Оплата размещения</h2>
+    <div class="muted small" style="margin-top:-6px;margin-bottom:12px">${esc(l.brand)} ${esc(l.model)}</div>
+    ${l.reject_reason ? `<div class="notice">${esc(l.reject_reason)}</div>` : ''}
+    <div class="specs">
+      <dt>К оплате</dt><dd style="font-size:20px">${price(l.amount)}</dd>
+      ${card ? `<dt>Карта</dt><dd><button class="btn sm secondary" id="copyCard">${esc(cardPretty)} ⧉</button></dd>` : `<dt>Карта</dt><dd>уточните у @${esc(META.adsContact)}</dd>`}
+      ${p.bank ? `<dt>Банк</dt><dd>${esc(p.bank)}</dd>` : ''}
+      ${p.holder ? `<dt>Получатель</dt><dd>${esc(p.holder)}</dd>` : ''}
+    </div>
+    <h3>Как оплатить</h3>
+    <ol class="small" style="padding-left:20px">
+      <li>Переведите <b>${price(l.amount)}</b> на карту выше.</li>
+      <li>Сделайте скриншот чека из приложения банка.</li>
+      <li>Прикрепите его ниже — администратор сверит оплату и опубликует пост.</li>
+    </ol>
+    <input type="file" id="receipt" accept="image/jpeg,image/png,image/webp" hidden />
+    <div id="receiptPreview"></div>
+    <div class="btns">
+      <button class="btn secondary" id="pick">🧾 Прикрепить чек</button>
+      <button class="btn" id="send" disabled>Отправить на проверку</button>
+    </div>
+    <p class="small muted">Оплачивая, вы соглашаетесь с <a href="#" id="toRules">правилами площадки</a>. При нарушении правил пост не будет опубликован.</p>`;
+  $('#toRules').onclick = (e) => (e.preventDefault(), push(renderRules));
+  if ($('#copyCard')) {
+    $('#copyCard').onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(card);
+        haptic();
+        toast('Номер карты скопирован');
+      } catch {
+        toast(card);
+      }
+    };
+  }
+  let blob = null;
+  $('#pick').onclick = () => $('#receipt').click();
+  $('#receipt').onchange = async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    try {
+      blob = await compressImage(f, 2000);
+    } catch {
+      return toast('Не удалось открыть изображение');
+    }
+    $('#receiptPreview').innerHTML = `<img src="${URL.createObjectURL(blob)}" alt="Чек" style="width:100%;max-height:320px;object-fit:contain;border-radius:12px;margin-top:12px;background:var(--bg2)" />`;
+    $('#pick').textContent = '🧾 Заменить чек';
+    $('#send').disabled = false;
+  };
+  $('#send').onclick = async () => {
+    const btn = $('#send');
+    btn.disabled = true;
+    btn.textContent = 'Отправляем…';
+    try {
+      const fd = new FormData();
+      fd.append('receipt', blob, 'receipt.jpg');
+      await api(`/listings/${l.id}/receipt`, { method: 'POST', body: fd });
+      tg?.HapticFeedback?.notificationOccurred('success');
+      toast('Чек отправлен. Администратор проверит оплату и опубликует пост — уведомление придёт в бота.', 4000);
+      go('profile');
+    } catch (e) {
+      toast(e.message, 4000);
+      btn.disabled = false;
+      btn.textContent = 'Отправить на проверку';
     }
   };
 }
@@ -481,13 +587,15 @@ function previewText(v) {
 async function renderFavorites() {
   view.innerHTML = `<h2>Избранное</h2><div id="list">${skeletons(4)}</div>`;
   try {
+    const holder = $('#list');
     const items = await api('/favorites');
+    if (!holder.isConnected) return;
     $('#list').innerHTML = items.length
       ? `<div class="grid">${items.map((l) => cardHtml(l)).join('')}</div>`
       : `<div class="empty"><b>♡</b>Сохраняйте понравившиеся вещи, чтобы не потерять</div>`;
     bindCards($('#list'));
   } catch (e) {
-    $('#list').innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    if ($('#list')) $('#list').innerHTML = `<div class="empty">${esc(e.message)}</div>`;
   }
 }
 
@@ -511,7 +619,9 @@ async function renderProfile() {
   $('#ads').onclick = () => openLink(`https://t.me/${META.adsContact}`);
   $('#rules').onclick = () => push(renderRules);
   try {
+    const holder = $('#list');
     const items = await api('/my');
+    if (!holder.isConnected) return;
     const list = $('#list');
     list.innerHTML = items.length
       ? items.map((l) => rowHtml(l, myActions(l))).join('')
@@ -520,12 +630,13 @@ async function renderProfile() {
     bindCards(list);
     list.querySelectorAll('[data-act]').forEach((b) => (b.onclick = () => myAction(b.dataset.act, Number(b.dataset.lid))));
   } catch (e) {
-    $('#list').innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    if ($('#list')) $('#list').innerHTML = `<div class="empty">${esc(e.message)}</div>`;
   }
 }
 
 function myActions(l) {
   const acts = [];
+  if (l.status === 'awaiting_payment') acts.push(`<button class="btn sm" data-act="pay" data-lid="${l.id}">Оплатить</button>`);
   if (l.status === 'published' && l.kind === 'sell') acts.push(`<button class="btn sm secondary" data-act="sold" data-lid="${l.id}">Продано</button>`);
   if (l.status === 'published' && l.kind === 'wtb') acts.push(`<button class="btn sm secondary" data-act="sold" data-lid="${l.id}">Нашёл</button>`);
   acts.push(`<button class="btn sm danger" data-act="archive" data-lid="${l.id}">${l.status === 'published' ? 'Снять' : 'Удалить'}</button>`);
@@ -534,6 +645,7 @@ function myActions(l) {
 
 async function myAction(act, id) {
   try {
+    if (act === 'pay') return push(() => renderPayment(id));
     if (act === 'sold') {
       if (!(await confirmDialog('Отметить как проданное? В посте канала появится пометка «ПРОДАНО».'))) return;
       await api(`/listings/${id}/sold`, { method: 'POST' });
@@ -554,7 +666,9 @@ async function myAction(act, id) {
 async function renderAdmin() {
   view.innerHTML = `<h2>Модерация</h2><div id="list">${skeletons(2)}</div>`;
   try {
+    const holder = $('#list');
     const items = await api('/admin/pending');
+    if (!holder.isConnected) return;
     const list = $('#list');
     list.innerHTML = items.length
       ? items
@@ -562,6 +676,7 @@ async function renderAdmin() {
             rowHtml(
               l,
               `<div class="actions" style="flex-direction:column">
+                ${l.has_receipt ? `<button class="btn sm secondary" data-rc="${l.id}">🧾</button>` : ''}
                 <button class="btn sm" data-ok="${l.id}">✓</button>
                 <button class="btn sm danger" data-no="${l.id}">✕</button>
               </div>`
@@ -582,17 +697,33 @@ async function renderAdmin() {
         renderAdmin();
       })
     );
+    list.querySelectorAll('[data-rc]').forEach(
+      (b) => (b.onclick = async () => {
+        // Чек отдаётся только админам, поэтому грузим с заголовком авторизации
+        const res = await fetch(`/api/admin/receipt/${b.dataset.rc}`, { headers: { 'X-Telegram-Init-Data': tg?.initData || '' } });
+        if (!res.ok) return toast('Чек не найден');
+        const url = URL.createObjectURL(await res.blob());
+        const sheet = $('#sheet');
+        sheet.innerHTML = `<div><h2>Чек #${b.dataset.rc}</h2><img src="${url}" alt="Чек" style="width:100%;border-radius:12px" /><div class="btns"><button class="btn secondary" id="closeSheet">Закрыть</button></div></div>`;
+        sheet.hidden = false;
+        sheet.onclick = (e) => (e.target === sheet || e.target.id === 'closeSheet') && ((sheet.hidden = true), URL.revokeObjectURL(url));
+      })
+    );
     list.querySelectorAll('[data-no]').forEach(
       (b) => (b.onclick = async () => {
-        const reason = window.prompt('Причина отказа (увидит автор):', 'Вещь не подходит под сегмент люкс/премиум');
+        const item = items.find((x) => x.id === Number(b.dataset.no));
+        const nopay = !!item?.amount && (await confirmDialog('Причина — оплата не найдена? (ОК — вернуть автору на шаг оплаты, Отмена — другая причина)'));
+        const reason = nopay
+          ? 'Оплата не найдена — проверьте перевод и прикрепите чек заново'
+          : window.prompt('Причина отказа (увидит автор):', 'Вещь не подходит под сегмент люкс/премиум');
         if (reason === null) return;
-        await api(`/admin/${b.dataset.no}/reject`, { method: 'POST', json: { reason } });
+        await api(`/admin/${b.dataset.no}/reject`, { method: 'POST', json: { reason, nopay } });
         toast('Отклонено');
         renderAdmin();
       })
     );
   } catch (e) {
-    $('#list').innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    if ($('#list')) $('#list').innerHTML = `<div class="empty">${esc(e.message)}</div>`;
   }
 }
 
@@ -614,6 +745,7 @@ function renderRules() {
   view.innerHTML = `<div class="rules">
     <h2>Правила площадки</h2>
     <ol>${RULES.map(([r, note]) => `<li><b>${esc(r)}</b>${note ? `<br/><span class="muted small">${esc(note)}</span>` : ''}</li>`).join('')}</ol>
+    ${META.payment ? `<p>Стоимость размещения — <b>${price(META.payment.amount)}</b> за одну вещь. Оплата переводом на карту администратора, чек прикрепляется в приложении.</p>` : ''}
     <div class="notice">При нарушении правил пост не будет опубликован.<br/>При оплате поста вы соглашаетесь с правилами площадки.</div>
     <h3>Безопасная сделка</h3>
     <p>Для сделок на расстоянии используйте гаранта площадки — комиссия <b>3%</b>.</p>

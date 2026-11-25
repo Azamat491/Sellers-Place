@@ -20,4 +20,9 @@ export const config = {
   devMode: process.env.DEV_MODE === 'true',
   dataDir: process.env.DATA_DIR || './data',
   maxPhotos: 10,
+  // Оплата размещения переводом на карту администратора (0 — бесплатно)
+  postPrice: Number(process.env.POST_PRICE ?? 150),
+  paymentCard: process.env.PAYMENT_CARD || '',
+  paymentBank: process.env.PAYMENT_BANK || '',
+  paymentHolder: process.env.PAYMENT_HOLDER || '',
 };
