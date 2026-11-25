@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <title>SELLERS PLACE</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <header class="top">
+    <button class="icon-btn" id="backBtn" hidden aria-label="Назад">‹</button>
+    <div class="logo">SELLERS PLACE <span>👁‍🗨</span></div>
+    <button class="icon-btn" id="rulesBtn" aria-label="Правила">?</button>
+  </header>
+  <main id="view"></main>
+  <nav class="tabbar" id="tabbar">
+    <button data-tab="feed" class="active"><i>◫</i><span>Каталог</span></button>
+    <button data-tab="wtb"><i>⌕</i><span>Ищут</span></button>
+    <button data-tab="create" class="plus"><i>＋</i></button>
+    <button data-tab="favorites"><i>♡</i><span>Избранное</span></button>
+    <button data-tab="profile"><i>◎</i><span>Профиль</span></button>
+  </nav>
+  <div id="sheet" class="sheet" hidden></div>
+  <div id="toast" class="toast" hidden></div>
+  <script src="app.js" type="module"></script>
+</body>
+</html>

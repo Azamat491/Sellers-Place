@@ -1,0 +1,28 @@
+{
+  "name": "sellers-place",
+  "version": "1.0.0",
+  "description": "Telegram Mini App для канала SELLERS PLACE",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node --no-warnings=ExperimentalWarning server/index.js",
+    "dev": "DEV_MODE=true node --no-warnings=ExperimentalWarning --watch server/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Azamat491/Sellers-Place.git"
+  },
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Azamat491/Sellers-Place/issues"
+  },
+  "homepage": "https://github.com/Azamat491/Sellers-Place#readme",
+  "dependencies": {
+    "express": "^4.22.3",
+    "grammy": "^1.48.0",
+    "multer": "^1.4.4"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.5"
+  }
+}
