@@ -1,11 +1,16 @@
 import path from 'node:path';
 import { Bot, InlineKeyboard, InputFile } from 'grammy';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 import { config } from './config.js';
 import { formatPost, channelPostUrl, formatPrice } from './format.js';
 import { db, getListing, setStatus, upsertUser } from './db.js';
 import { isAdminUser } from './auth.js';
 
-export const bot = config.botToken ? new Bot(config.botToken) : null;
+// TELEGRAM_PROXY — необязательный HTTP(S)-прокси до api.telegram.org (если сервер не может достучаться напрямую)
+const proxy = process.env.TELEGRAM_PROXY;
+export const bot = config.botToken
+  ? new Bot(config.botToken, proxy ? { client: { baseFetchConfig: { agent: new HttpsProxyAgent(proxy), compress: true } } } : {})
+  : null;
 
 const photoInput = (p) => new InputFile(path.join(config.dataDir, 'uploads', path.basename(p)));
 
