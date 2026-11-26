@@ -60,7 +60,7 @@ export async function refreshChannelPost(listing) {
   const caption = formatPost(listing);
   try {
     if (listing.photos.length === 0) {
-      await bot.api.editMessageText(config.channelId, first, caption, { parse_mode: 'HTML' });
+      await bot.api.editMessageText(config.channelId, first, caption, { parse_mode: 'HTML', link_preview_options: { is_disabled: true } });
     } else {
       await bot.api.editMessageCaption(config.channelId, first, { caption, parse_mode: 'HTML' });
     }
@@ -163,7 +163,8 @@ export async function sendToModeration(listing) {
   const payLine = listing.status === 'awaiting_payment'
     ? `💳 Ждёт оплаты ${formatPrice(listing.amount)}. ${who} напишет @${config.paymentContact} в ЛС с номером <b>#${listing.id}</b>.\nПосле оплаты нажмите «Оплачено».\n`
     : '';
-  const caption = `🆕 Объявление <b>#${listing.id}</b>\n${payLine}\n${formatPost(listing)}`.slice(0, 1024);
+  const prefix = `🆕 Объявление <b>#${listing.id}</b>\n${payLine}\n`;
+  const caption = prefix + formatPost(listing, prefix.replace(/<[^>]+>/g, '').length);
   const recipients = adminRecipientIds();
   if (!recipients.length) console.warn('Нет админов для уведомлений: задайте ADMIN_USERNAMES и нажмите /start в боте с аккаунта админа');
   for (const adminId of recipients) {
@@ -174,7 +175,7 @@ export async function sendToModeration(listing) {
       if (listing.photos.length === 1) {
         await bot.api.sendPhoto(adminId, photoInput(listing.photos[0]), { caption, parse_mode: 'HTML', reply_markup: kb });
       } else {
-        await bot.api.sendMessage(adminId, caption, { parse_mode: 'HTML', reply_markup: kb });
+        await bot.api.sendMessage(adminId, caption, { parse_mode: 'HTML', reply_markup: kb, link_preview_options: { is_disabled: true } });
       }
     } catch (e) {
       console.warn('moderation notify', adminId, e.description || e.message);

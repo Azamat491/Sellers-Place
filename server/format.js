@@ -11,7 +11,7 @@ function contactLine(l, role) {
 }
 
 /** Текст поста в стиле канала SELLERS PLACE (HTML parse mode, лимит подписи 1024) */
-export function formatPost(l) {
+export function formatPost(l, reserve = 0) {
   const title = [l.brand, l.model].filter(Boolean).map(esc).join(' | ');
   const lines = [];
 
@@ -31,7 +31,7 @@ export function formatPost(l) {
   const deal = [];
   if (l.meetup && l.city) deal.push(`Личная встреча ${esc(l.city)}`);
   deal.push(...l.delivery.map(esc));
-  if (l.garant) deal.push('Garant 3 процента');
+  if (l.garant) deal.push(`<a href="https://t.me/${esc(config.garantContact)}">Garant 3 процента</a>`);
 
   const footer = [];
   if (deal.length) footer.push('', deal.join(' / '));
@@ -41,7 +41,7 @@ export function formatPost(l) {
   let head = lines.join('\n');
   const tail = footer.join('\n');
   let desc = l.description ? `\n\n${esc(l.description)}` : '';
-  const limit = 1024 - 20;
+  const limit = 1024 - 20 - reserve;
   const visibleLen = (s) => s.replace(/<[^>]+>/g, '').length;
   while (desc && visibleLen(head + desc + tail) > limit) {
     desc = desc.slice(0, Math.max(0, desc.length - 50)).replace(/&[a-z]*$/, '') + '…';
