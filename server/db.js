@@ -4,7 +4,6 @@ import path from 'node:path';
 import { config } from './config.js';
 
 fs.mkdirSync(path.join(config.dataDir, 'uploads'), { recursive: true });
-fs.mkdirSync(path.join(config.dataDir, 'receipts'), { recursive: true });
 
 export const db = new DatabaseSync(path.join(config.dataDir, 'sellersplace.db'));
 
@@ -35,7 +34,8 @@ CREATE TABLE IF NOT EXISTS listings (
   garant INTEGER NOT NULL DEFAULT 1,
   description TEXT NOT NULL DEFAULT '',
   photos TEXT NOT NULL DEFAULT '[]',
-  -- awaiting_payment → pending → published / rejected; published → sold / archived
+  -- awaiting_payment (оплата у админа в ЛС) → published / rejected; без оплаты: pending → published / rejected;
+  -- published → sold / archived
   status TEXT NOT NULL DEFAULT 'pending',
   reject_reason TEXT,
   channel_message_ids TEXT NOT NULL DEFAULT '[]',
@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS favorites (
 
 // Миграции: добавляем колонки, если их нет
 const cols = db.prepare('PRAGMA table_info(listings)').all().map((c) => c.name);
-for (const [name, def] of [['amount', 'INTEGER'], ['receipt', 'TEXT'], ['paid_at', 'TEXT']]) {
+for (const [name, def] of [['amount', 'INTEGER'], ['paid_at', 'TEXT']]) {
   if (!cols.includes(name)) db.exec(`ALTER TABLE listings ADD COLUMN ${name} ${def}`);
 }
 

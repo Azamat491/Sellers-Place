@@ -1,15 +1,17 @@
 import path from 'node:path';
 import { Bot, InlineKeyboard, InputFile } from 'grammy';
 import { config } from './config.js';
-import { formatPost, channelPostUrl } from './format.js';
+import { formatPost, channelPostUrl, formatPrice } from './format.js';
 import { getListing, setStatus } from './db.js';
 
 export const bot = config.botToken ? new Bot(config.botToken) : null;
 
 const photoInput = (p) => new InputFile(path.join(config.dataDir, 'uploads', path.basename(p)));
 
+const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 const REJECT_REASONS = {
-  nopay: 'Оплата не найдена — проверьте перевод и прикрепите чек заново',
+  nopay: 'Оплата не поступила',
   fake: 'Фейк вещь (п. 1)',
   ads: 'Реклама сторонних проектов (п. 5)',
   repeat: 'Эта вещь уже публиковалась менее 3 недель назад (п. 6)',
@@ -80,9 +82,34 @@ export async function notifyUser(userId, text, extra = {}) {
   }
 }
 
+const MODERATABLE = ['pending', 'awaiting_payment'];
+const STATUS_RU = {
+  awaiting_payment: '💳 Ждёт оплаты', pending: '⏳ На модерации', published: '✅ Опубликовано',
+  rejected: '❌ Отклонено', sold: 'Продано', archived: 'Снято',
+};
+const statusKb = (l) =>
+  MODERATABLE.includes(l?.status) ? moderationKb(l) : new InlineKeyboard().text(STATUS_RU[l?.status] || 'Не найдено', 'noop');
+
+/** Ссылка на ЛС администратора с готовым текстом сообщения об оплате */
+export function paymentLink(l) {
+  const text = `Здравствуйте! Хочу оплатить размещение объявления #${l.id} — ${l.brand} ${l.model} (${formatPrice(l.amount)})`;
+  return `https://t.me/${config.paymentContact}?text=${encodeURIComponent(text)}`;
+}
+
+/** Продублировать инструкцию по оплате в бота — на случай, если клиент закрыл приложение */
+export async function notifyPaymentInstructions(l) {
+  await notifyUser(
+    l.user_id,
+    `📝 Объявление #${l.id} «${esc(l.brand)} ${esc(l.model)}» создано.\n\n` +
+      `Стоимость размещения — <b>${formatPrice(l.amount)}</b>. Оплата принимается у администратора @${config.paymentContact} в личных сообщениях. ` +
+      `Нажмите кнопку ниже — сообщение с номером объявления уже будет готово.\n\nПосле оплаты пост опубликуют в канале, мы пришлём ссылку.`,
+    { reply_markup: new InlineKeyboard().url('💬 Написать администратору', paymentLink(l)) }
+  );
+}
+
 export async function approveListing(id) {
   let l = getListing(id);
-  if (!l || l.status !== 'pending') return l;
+  if (!l || !MODERATABLE.includes(l.status)) return l;
   const ids = await publishToChannel(l);
   l = setStatus(id, 'published', { channel_message_ids: ids, ...(l.amount ? { paid_at: new Date().toISOString() } : {}) });
   const url = channelPostUrl(ids[0]);
@@ -92,11 +119,13 @@ export async function approveListing(id) {
 
 export async function rejectListing(id, reason, { backToPayment = false } = {}) {
   const l = getListing(id);
-  if (!l || l.status !== 'pending') return l;
+  if (!l || !MODERATABLE.includes(l.status)) return l;
   if (backToPayment) {
-    // Оплата не найдена: возвращаем объявление на шаг оплаты, чтобы автор приложил верный чек
-    const out = setStatus(id, 'awaiting_payment', { reject_reason: reason || null, receipt: null });
-    await notifyUser(l.user_id, `⚠️ Объявление «${l.brand}»: ${reason}\n\nОткройте приложение → Профиль → «Оплатить».`);
+    // Оплата не поступила: объявление остаётся в статусе «Ждёт оплаты», клиенту — напоминание
+    const out = setStatus(id, 'awaiting_payment', { reject_reason: reason || null });
+    await notifyUser(l.user_id, `⚠️ Объявление #${l.id} «${esc(l.brand)}»: оплата пока не поступила.\nНапишите администратору @${config.paymentContact}.`, {
+      reply_markup: new InlineKeyboard().url('💬 Написать администратору', paymentLink(l)),
+    });
     return out;
   }
   const out = setStatus(id, 'rejected', { reject_reason: reason || null });
@@ -106,23 +135,20 @@ export async function rejectListing(id, reason, { backToPayment = false } = {}) 
 
 const moderationKb = (l) =>
   new InlineKeyboard()
-    .text(l.amount ? '✅ Оплата есть — опубликовать' : '✅ Опубликовать', `mod:ok:${l.id}`).row()
+    .text(l.amount ? '✅ Оплачено — опубликовать' : '✅ Опубликовать', `mod:ok:${l.id}`).row()
     .text('❌ Отклонить', `mod:no:${l.id}`);
 
 /** Уведомить модераторов о новом объявлении */
 export async function sendToModeration(listing) {
   if (!bot) return console.log(`[dev] на модерации #${listing.id}`);
   const kb = moderationKb(listing);
-  const paidLine = listing.amount ? `💳 Оплата ${listing.amount} ₽ — чек выше, сверьте поступление на карту\n` : '';
-  const caption = `🆕 Объявление #${listing.id} на модерации\n${paidLine}\n${formatPost(listing)}`.slice(0, 1024);
+  const who = listing.username ? `@${esc(listing.username)}` : `<a href="tg://user?id=${listing.user_id}">${esc(listing.first_name || 'клиент')}</a>`;
+  const payLine = listing.status === 'awaiting_payment'
+    ? `💳 Ждёт оплаты ${formatPrice(listing.amount)}. ${who} напишет @${config.paymentContact} в ЛС с номером <b>#${listing.id}</b>.\nПосле оплаты нажмите «Оплачено».\n`
+    : '';
+  const caption = `🆕 Объявление <b>#${listing.id}</b>\n${payLine}\n${formatPost(listing)}`.slice(0, 1024);
   for (const adminId of config.adminIds) {
     try {
-      if (listing.receipt) {
-        const who = listing.username ? `@${listing.username}` : listing.first_name || listing.user_id;
-        await bot.api.sendPhoto(adminId, new InputFile(path.join(config.dataDir, 'receipts', path.basename(listing.receipt))), {
-          caption: `🧾 Чек #${listing.id} от ${who} на ${listing.amount} ₽`,
-        });
-      }
       if (listing.photos.length > 1) {
         await bot.api.sendMediaGroup(adminId, listing.photos.map((p) => ({ type: 'photo', media: photoInput(p) })));
       }
@@ -161,8 +187,8 @@ export function setupBot() {
   bot.callbackQuery(/^mod:ok:(\d+)$/, async (ctx) => {
     if (!isAdmin(ctx)) return ctx.answerCallbackQuery('Нет доступа');
     const l = await approveListing(Number(ctx.match[1]));
-    await ctx.answerCallbackQuery(l?.status === 'published' ? 'Опубликовано' : `Статус: ${l?.status}`);
-    await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard().text(`Статус: ${l?.status}`, 'noop') }).catch(() => {});
+    await ctx.answerCallbackQuery(STATUS_RU[l?.status] || 'Не найдено');
+    await ctx.editMessageReplyMarkup({ reply_markup: statusKb(l) }).catch(() => {});
   });
 
   bot.callbackQuery(/^mod:no:(\d+)$/, async (ctx) => {
@@ -172,7 +198,7 @@ export function setupBot() {
     const l = getListing(Number(id));
     for (const [key, text] of Object.entries(REJECT_REASONS)) {
       if (key === 'nopay' && !l?.amount) continue;
-      kb.text(key === 'nopay' ? 'Оплата не найдена' : text, `mod:rj:${id}:${key}`).row();
+      kb.text(text, `mod:rj:${id}:${key}`).row();
     }
     kb.text('← Назад', `mod:back:${id}`);
     await ctx.editMessageReplyMarkup({ reply_markup: kb });
@@ -189,8 +215,8 @@ export function setupBot() {
   bot.callbackQuery(/^mod:rj:(\d+):(\w+)$/, async (ctx) => {
     if (!isAdmin(ctx)) return ctx.answerCallbackQuery('Нет доступа');
     const l = await rejectListing(Number(ctx.match[1]), REJECT_REASONS[ctx.match[2]], { backToPayment: ctx.match[2] === 'nopay' });
-    await ctx.answerCallbackQuery('Отклонено');
-    await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard().text(`Статус: ${l?.status}`, 'noop') }).catch(() => {});
+    await ctx.answerCallbackQuery(l?.status === 'awaiting_payment' ? 'Клиенту отправлено напоминание об оплате' : 'Отклонено');
+    await ctx.editMessageReplyMarkup({ reply_markup: statusKb(l) }).catch(() => {});
   });
 
   bot.callbackQuery('noop', (ctx) => ctx.answerCallbackQuery());

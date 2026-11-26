@@ -231,7 +231,7 @@ function rowHtml(l, actions = '') {
   return `<div class="row-card">
     <div class="thumb" data-id="${l.id}" ${thumb}>${l.photos[0] ? '' : l.kind === 'wtb' ? '🔎' : '👕'}</div>
     <div class="info" data-id="${l.id}">
-      <div><b>${l.kind === 'wtb' ? 'ИЩУ: ' : ''}${esc(l.brand)}</b> <span class="muted">${esc(l.model)}</span></div>
+      <div>${actions ? `<span class="muted small">#${l.id}</span> ` : ''}<b>${l.kind === 'wtb' ? 'ИЩУ: ' : ''}${esc(l.brand)}</b> <span class="muted">${esc(l.model)}</span></div>
       <div class="small muted">${esc([l.size && `Размер ${l.size}`, l.price && (l.kind === 'wtb' ? `до ${price(l.price)}` : price(l.price)), l.city].filter(Boolean).join(' · '))}</div>
       ${actions ? `<div class="small" style="margin-top:4px"><span class="badge ${st?.[1] || ''}" style="position:static">${st?.[0] || l.status}</span></div>` : ''}
       ${l.status === 'rejected' && l.reject_reason ? `<div class="small" style="color:var(--bad);margin-top:4px">${esc(l.reject_reason)}</div>` : ''}
@@ -349,7 +349,7 @@ function renderCreate() {
       </div>
       <h3>Так пост будет выглядеть в канале</h3>
       <div class="preview" id="preview"></div>
-      ${META.payment ? `<div class="notice">Размещение — <b>${price(META.payment.amount)}</b> за вещь. На следующем шаге — реквизиты для перевода и загрузка чека.</div>` : ''}
+      ${META.payment ? `<div class="notice">Размещение — <b>${price(META.payment.amount)}</b> за вещь. Оплата — у администратора @${esc(META.payment.contact)} в личных сообщениях, на следующем шаге откроем чат с ним.</div>` : ''}
       <p class="small muted">${META.autoPublish ? 'Объявление будет опубликовано сразу.' : 'Перед публикацией объявление проверит модератор. Мы пришлём уведомление в бота.'}
         Публикуя, вы соглашаетесь с <a href="#" id="toRules">правилами площадки</a>.</p>
       <button class="btn" type="submit" id="submit">${submitLabel()}</button>
@@ -431,14 +431,19 @@ function submitLabel() {
   return META.payment && !META.isAdmin ? `Далее — оплата ${price(META.payment.amount)}` : 'Отправить на публикацию';
 }
 
-// ---------- Оплата ----------
+// ---------- Оплата (у администратора в личных сообщениях) ----------
+function paymentLink(l) {
+  const text = `Здравствуйте! Хочу оплатить размещение объявления #${l.id} — ${l.brand} ${l.model} (${price(l.amount)})`;
+  return `https://t.me/${META.payment.contact}?text=${encodeURIComponent(text)}`;
+}
+
 async function renderPayment(id) {
   view.innerHTML = skeletons(1);
   const seq = navSeq;
   let l;
   try {
     l = await api(`/listings/${id}`);
-    if (seq !== navSeq) return; // пользователь уже ушёл на другой экран
+    if (seq !== navSeq) return;
   } catch (e) {
     view.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
     return;
@@ -447,75 +452,30 @@ async function renderPayment(id) {
     view.innerHTML = `<div class="empty"><b>✓</b>Объявление уже оплачено</div>`;
     return;
   }
-  const p = META.payment;
-  const card = (p.card || '').replace(/\s+/g, '');
-  const cardPretty = card.replace(/(\d{4})(?=\d)/g, '$1 ');
+  const contact = META.payment.contact;
   view.innerHTML = `
     <h2>Оплата размещения</h2>
     <div class="muted small" style="margin-top:-6px;margin-bottom:12px">${esc(l.brand)} ${esc(l.model)}</div>
-    ${l.reject_reason ? `<div class="notice">${esc(l.reject_reason)}</div>` : ''}
-    <div class="specs">
+    ${l.reject_reason ? `<div class="notice">${esc(l.reject_reason)}. Напишите администратору.</div>` : ''}
+    <dl class="specs">
+      <dt>Номер объявления</dt><dd style="font-size:20px">#${l.id}</dd>
       <dt>К оплате</dt><dd style="font-size:20px">${price(l.amount)}</dd>
-      ${card ? `<dt>Карта</dt><dd><button class="btn sm secondary" id="copyCard">${esc(cardPretty)} ⧉</button></dd>` : `<dt>Карта</dt><dd>уточните у @${esc(META.adsContact)}</dd>`}
-      ${p.bank ? `<dt>Банк</dt><dd>${esc(p.bank)}</dd>` : ''}
-      ${p.holder ? `<dt>Получатель</dt><dd>${esc(p.holder)}</dd>` : ''}
-    </div>
+      <dt>Администратор</dt><dd>@${esc(contact)}</dd>
+    </dl>
     <h3>Как оплатить</h3>
     <ol class="small" style="padding-left:20px">
-      <li>Переведите <b>${price(l.amount)}</b> на карту выше.</li>
-      <li>Сделайте скриншот чека из приложения банка.</li>
-      <li>Прикрепите его ниже — администратор сверит оплату и опубликует пост.</li>
+      <li>Нажмите кнопку ниже — откроется чат с администратором, сообщение с номером <b>#${l.id}</b> уже будет написано. Отправьте его.</li>
+      <li>Администратор пришлёт реквизиты — переведите <b>${price(l.amount)}</b>.</li>
+      <li>После оплаты администратор опубликует пост, ссылка придёт в бота.</li>
     </ol>
-    <input type="file" id="receipt" accept="image/jpeg,image/png,image/webp" hidden />
-    <div id="receiptPreview"></div>
     <div class="btns">
-      <button class="btn secondary" id="pick">🧾 Прикрепить чек</button>
-      <button class="btn" id="send" disabled>Отправить на проверку</button>
+      <button class="btn" id="writeAdmin">💬 Написать @${esc(contact)}</button>
+      <button class="btn secondary" id="later">Оплачу позже</button>
     </div>
-    <p class="small muted">Оплачивая, вы соглашаетесь с <a href="#" id="toRules">правилами площадки</a>. При нарушении правил пост не будет опубликован.</p>`;
+    <p class="small muted">Объявление сохранено в профиле со статусом «Ждёт оплаты». Оплачивая, вы соглашаетесь с <a href="#" id="toRules">правилами площадки</a>. При нарушении правил пост не будет опубликован.</p>`;
   $('#toRules').onclick = (e) => (e.preventDefault(), push(renderRules));
-  if ($('#copyCard')) {
-    $('#copyCard').onclick = async () => {
-      try {
-        await navigator.clipboard.writeText(card);
-        haptic();
-        toast('Номер карты скопирован');
-      } catch {
-        toast(card);
-      }
-    };
-  }
-  let blob = null;
-  $('#pick').onclick = () => $('#receipt').click();
-  $('#receipt').onchange = async (e) => {
-    const f = e.target.files[0];
-    if (!f) return;
-    try {
-      blob = await compressImage(f, 2000);
-    } catch {
-      return toast('Не удалось открыть изображение');
-    }
-    $('#receiptPreview').innerHTML = `<img src="${URL.createObjectURL(blob)}" alt="Чек" style="width:100%;max-height:320px;object-fit:contain;border-radius:12px;margin-top:12px;background:var(--bg2)" />`;
-    $('#pick').textContent = '🧾 Заменить чек';
-    $('#send').disabled = false;
-  };
-  $('#send').onclick = async () => {
-    const btn = $('#send');
-    btn.disabled = true;
-    btn.textContent = 'Отправляем…';
-    try {
-      const fd = new FormData();
-      fd.append('receipt', blob, 'receipt.jpg');
-      await api(`/listings/${l.id}/receipt`, { method: 'POST', body: fd });
-      tg?.HapticFeedback?.notificationOccurred('success');
-      toast('Чек отправлен. Администратор проверит оплату и опубликует пост — уведомление придёт в бота.', 4000);
-      go('profile');
-    } catch (e) {
-      toast(e.message, 4000);
-      btn.disabled = false;
-      btn.textContent = 'Отправить на проверку';
-    }
-  };
+  $('#writeAdmin').onclick = () => (haptic(), openLink(paymentLink(l)));
+  $('#later').onclick = () => go('profile');
 }
 
 function renderPhotos() {
@@ -676,7 +636,6 @@ async function renderAdmin() {
             rowHtml(
               l,
               `<div class="actions" style="flex-direction:column">
-                ${l.has_receipt ? `<button class="btn sm secondary" data-rc="${l.id}">🧾</button>` : ''}
                 <button class="btn sm" data-ok="${l.id}">✓</button>
                 <button class="btn sm danger" data-no="${l.id}">✕</button>
               </div>`
@@ -697,24 +656,12 @@ async function renderAdmin() {
         renderAdmin();
       })
     );
-    list.querySelectorAll('[data-rc]').forEach(
-      (b) => (b.onclick = async () => {
-        // Чек отдаётся только админам, поэтому грузим с заголовком авторизации
-        const res = await fetch(`/api/admin/receipt/${b.dataset.rc}`, { headers: { 'X-Telegram-Init-Data': tg?.initData || '' } });
-        if (!res.ok) return toast('Чек не найден');
-        const url = URL.createObjectURL(await res.blob());
-        const sheet = $('#sheet');
-        sheet.innerHTML = `<div><h2>Чек #${b.dataset.rc}</h2><img src="${url}" alt="Чек" style="width:100%;border-radius:12px" /><div class="btns"><button class="btn secondary" id="closeSheet">Закрыть</button></div></div>`;
-        sheet.hidden = false;
-        sheet.onclick = (e) => (e.target === sheet || e.target.id === 'closeSheet') && ((sheet.hidden = true), URL.revokeObjectURL(url));
-      })
-    );
     list.querySelectorAll('[data-no]').forEach(
       (b) => (b.onclick = async () => {
         const item = items.find((x) => x.id === Number(b.dataset.no));
-        const nopay = !!item?.amount && (await confirmDialog('Причина — оплата не найдена? (ОК — вернуть автору на шаг оплаты, Отмена — другая причина)'));
+        const nopay = item?.status === 'awaiting_payment' && (await confirmDialog('Оплата не поступила? ОК — напомнить клиенту об оплате, Отмена — отклонить по другой причине'));
         const reason = nopay
-          ? 'Оплата не найдена — проверьте перевод и прикрепите чек заново'
+          ? 'Оплата не поступила'
           : window.prompt('Причина отказа (увидит автор):', 'Вещь не подходит под сегмент люкс/премиум');
         if (reason === null) return;
         await api(`/admin/${b.dataset.no}/reject`, { method: 'POST', json: { reason, nopay } });
@@ -745,7 +692,7 @@ function renderRules() {
   view.innerHTML = `<div class="rules">
     <h2>Правила площадки</h2>
     <ol>${RULES.map(([r, note]) => `<li><b>${esc(r)}</b>${note ? `<br/><span class="muted small">${esc(note)}</span>` : ''}</li>`).join('')}</ol>
-    ${META.payment ? `<p>Стоимость размещения — <b>${price(META.payment.amount)}</b> за одну вещь. Оплата переводом на карту администратора, чек прикрепляется в приложении.</p>` : ''}
+    ${META.payment ? `<p>Стоимость размещения — <b>${price(META.payment.amount)}</b> за одну вещь. Оплата — у администратора @${esc(META.payment.contact)} в личных сообщениях.</p>` : ''}
     <div class="notice">При нарушении правил пост не будет опубликован.<br/>При оплате поста вы соглашаетесь с правилами площадки.</div>
     <h3>Безопасная сделка</h3>
     <p>Для сделок на расстоянии используйте гаранта площадки — комиссия <b>3%</b>.</p>

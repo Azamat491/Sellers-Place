@@ -20,9 +20,8 @@ export const config = {
   devMode: process.env.DEV_MODE === 'true',
   dataDir: process.env.DATA_DIR || './data',
   maxPhotos: 10,
-  // Оплата размещения переводом на карту администратора (0 — бесплатно)
+  // Стоимость размещения (0 — бесплатно). Оплату принимает администратор в личных сообщениях.
   postPrice: Number(process.env.POST_PRICE ?? 150),
-  paymentCard: process.env.PAYMENT_CARD || '',
-  paymentBank: process.env.PAYMENT_BANK || '',
-  paymentHolder: process.env.PAYMENT_HOLDER || '',
+  // @username администратора, которому клиент пишет для оплаты
+  paymentContact: (process.env.PAYMENT_CONTACT || process.env.ADS_CONTACT || 'ranjiroakim').replace(/^@/, ''),
 };
