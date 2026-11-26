@@ -4,6 +4,7 @@ const list = (v) => (v || '').split(',').map((s) => s.trim()).filter(Boolean);
 
 export const config = {
   port: Number(process.env.PORT || 3000),
+  host: process.env.HOST || '0.0.0.0',
   // Публичный HTTPS-адрес, на котором открыт мини-апп (нужен для кнопки в боте)
   webAppUrl: process.env.WEBAPP_URL || '',
   botToken: process.env.BOT_TOKEN || '',
@@ -12,6 +13,9 @@ export const config = {
   channelUsername: process.env.CHANNEL_USERNAME || 'sellersplace2',
   // Telegram user id администраторов (модерация), через запятую
   adminIds: list(process.env.ADMIN_IDS).map(Number),
+  // Или проще — @username администраторов через запятую. Админ должен один раз нажать /start в боте,
+  // после этого бот запоминает его и присылает объявления на модерацию.
+  adminUsernames: list(process.env.ADMIN_USERNAMES).map((u) => u.replace(/^@/, '').toLowerCase()),
   adsContact: process.env.ADS_CONTACT || 'ranjiroakim',
   garantContact: process.env.GARANT_CONTACT || 'ranjiroakim',
   // Если true — объявления публикуются без модерации

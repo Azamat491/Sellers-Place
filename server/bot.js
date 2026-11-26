@@ -2,7 +2,8 @@ import path from 'node:path';
 import { Bot, InlineKeyboard, InputFile } from 'grammy';
 import { config } from './config.js';
 import { formatPost, channelPostUrl, formatPrice } from './format.js';
-import { getListing, setStatus } from './db.js';
+import { db, getListing, setStatus, upsertUser } from './db.js';
+import { isAdminUser } from './auth.js';
 
 export const bot = config.botToken ? new Bot(config.botToken) : null;
 
@@ -92,7 +93,8 @@ const statusKb = (l) =>
 
 /** Ссылка на ЛС администратора с готовым текстом сообщения об оплате */
 export function paymentLink(l) {
-  const text = `Здравствуйте! Хочу оплатить размещение объявления #${l.id} — ${l.brand} ${l.model} (${formatPrice(l.amount)})`;
+  const what = l.kind === 'wtb' ? 'запроса «Ищу»' : 'объявления';
+  const text = `Здравствуйте! Хочу оплатить размещение ${what} #${l.id} — ${l.brand} ${l.model} (${formatPrice(l.amount)})`;
   return `https://t.me/${config.paymentContact}?text=${encodeURIComponent(text)}`;
 }
 
@@ -138,6 +140,16 @@ const moderationKb = (l) =>
     .text(l.amount ? '✅ Оплачено — опубликовать' : '✅ Опубликовать', `mod:ok:${l.id}`).row()
     .text('❌ Отклонить', `mod:no:${l.id}`);
 
+/** Кому слать модерацию: ADMIN_IDS + пользователи из ADMIN_USERNAMES, которые уже запускали бота */
+function adminRecipientIds() {
+  const ids = new Set(config.adminIds);
+  if (config.adminUsernames.length) {
+    const marks = config.adminUsernames.map(() => '?').join(',');
+    for (const r of db.prepare(`SELECT id FROM users WHERE lower(username) IN (${marks})`).all(...config.adminUsernames)) ids.add(r.id);
+  }
+  return [...ids];
+}
+
 /** Уведомить модераторов о новом объявлении */
 export async function sendToModeration(listing) {
   if (!bot) return console.log(`[dev] на модерации #${listing.id}`);
@@ -147,7 +159,9 @@ export async function sendToModeration(listing) {
     ? `💳 Ждёт оплаты ${formatPrice(listing.amount)}. ${who} напишет @${config.paymentContact} в ЛС с номером <b>#${listing.id}</b>.\nПосле оплаты нажмите «Оплачено».\n`
     : '';
   const caption = `🆕 Объявление <b>#${listing.id}</b>\n${payLine}\n${formatPost(listing)}`.slice(0, 1024);
-  for (const adminId of config.adminIds) {
+  const recipients = adminRecipientIds();
+  if (!recipients.length) console.warn('Нет админов для уведомлений: задайте ADMIN_USERNAMES и нажмите /start в боте с аккаунта админа');
+  for (const adminId of recipients) {
     try {
       if (listing.photos.length > 1) {
         await bot.api.sendMediaGroup(adminId, listing.photos.map((p) => ({ type: 'photo', media: photoInput(p) })));
@@ -171,18 +185,29 @@ export function setupBot() {
   const openKb = () =>
     config.webAppUrl ? new InlineKeyboard().webApp('🛍 Открыть SELLERS PLACE', config.webAppUrl) : undefined;
 
-  bot.command('start', (ctx) =>
-    ctx.reply(
+  // Запоминаем каждого, кто пишет боту: так админы из ADMIN_USERNAMES получают уведомления без ручного ввода id
+  bot.use(async (ctx, next) => {
+    if (ctx.from && !ctx.from.is_bot) upsertUser(ctx.from);
+    await next();
+  });
+
+  bot.command('id', (ctx) => ctx.reply(`Ваш Telegram id: <code>${ctx.from.id}</code>`, { parse_mode: 'HTML' }));
+
+  bot.command('start', async (ctx) => {
+    if (isAdminUser(ctx.from)) {
+      await ctx.reply('🛠 Вы администратор SELLERS PLACE. Сюда будут приходить новые объявления с кнопками «Оплачено — опубликовать» и «Отклонить».');
+    }
+    return ctx.reply(
       '<b>SELLERS PLACE 👁‍🗨</b>\nПлощадка для продажи брендовых вещей в сегменте люкс и премиум.\n\n' +
         '• Разместите вещь — пост появится в канале после модерации\n' +
         '• Ищете конкретную вещь — оставьте запрос «Ищу»\n' +
         '• Смотрите каталог с фильтрами по бренду, размеру и цене\n\n' +
         `Реклама и сотрудничество — @${config.adsContact}`,
       { parse_mode: 'HTML', reply_markup: openKb() }
-    )
-  );
+    );
+  });
 
-  const isAdmin = (ctx) => config.adminIds.includes(ctx.from?.id);
+  const isAdmin = (ctx) => isAdminUser(ctx.from);
 
   bot.callbackQuery(/^mod:ok:(\d+)$/, async (ctx) => {
     if (!isAdmin(ctx)) return ctx.answerCallbackQuery('Нет доступа');

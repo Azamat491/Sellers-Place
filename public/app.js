@@ -433,7 +433,8 @@ function submitLabel() {
 
 // ---------- Оплата (у администратора в личных сообщениях) ----------
 function paymentLink(l) {
-  const text = `Здравствуйте! Хочу оплатить размещение объявления #${l.id} — ${l.brand} ${l.model} (${price(l.amount)})`;
+  const what = l.kind === 'wtb' ? 'запроса «Ищу»' : 'объявления';
+  const text = `Здравствуйте! Хочу оплатить размещение ${what} #${l.id} — ${l.brand} ${l.model} (${price(l.amount)})`;
   return `https://t.me/${META.payment.contact}?text=${encodeURIComponent(text)}`;
 }
 

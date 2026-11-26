@@ -235,5 +235,5 @@ app.use((err, _req, res, _next) => {
   res.status(err instanceof multer.MulterError ? 400 : 500).json({ error: msg });
 });
 
-app.listen(config.port, () => console.log(`SELLERS PLACE mini app: http://localhost:${config.port}`));
+app.listen(config.port, config.host, () => console.log(`SELLERS PLACE mini app: http://localhost:${config.port}`));
 setupBot();

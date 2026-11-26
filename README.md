@@ -46,15 +46,50 @@ npm install
 npm run dev      # http://localhost:3000, без Telegram: тестовый пользователь с правами админа
 ```
 
-## Запуск в продакшене
+## Запуск на VPS — пошагово
 
-1. В @BotFather: `/newbot` → получить токен. Затем `/newapp` (или Bot Settings → Menu Button) и указать HTTPS-адрес приложения.
-2. Добавить бота в канал администратором с правами «Публикация», «Редактирование» и «Удаление сообщений».
-3. Скопировать `.env.example` в `.env` и заполнить (`BOT_TOKEN`, `WEBAPP_URL`, `ADMIN_IDS`).
-4. Развернуть на сервере с HTTPS (VPS + nginx/Caddy, Railway, Render, Fly.io):
-   ```bash
-   docker build -t sellers-place .
-   docker run -d --env-file .env -p 3000:3000 -v sellers-data:/data sellers-place
-   ```
-   или `npm ci && npm start` (Node ≥ 22.5). Папку `DATA_DIR` (база и фото) нужно сохранять между перезапусками.
-5. Закрепить в канале пост с кнопкой-ссылкой на приложение: `https://t.me/<бот>/<app>`; на конкретную вещь — `?startapp=item_<id>`, сразу на форму продажи — `?startapp=sell`.
+**1. Бот.** В Telegram откройте @BotFather → `/newbot` → придумайте имя и username (должен заканчиваться на `bot`).
+Сохраните токен — его спросит установщик. Никому его не пересылайте.
+
+**2. Бот — админ канала.** Канал → Управление каналом → Администраторы → Добавить → найдите бота.
+Включите права: публикация, редактирование и удаление сообщений.
+
+**3. VPS.** Арендуйте сервер: Ubuntu 24.04, 1 ГБ RAM, 1 ядро. Хостер пришлёт IP-адрес и пароль root.
+
+**4. Подключитесь к серверу** (на Windows — PowerShell, на Mac — Терминал):
+```bash
+ssh root@<IP-адрес>
+```
+
+**5. Скачайте проект и запустите установку:**
+```bash
+apt-get update && apt-get install -y git
+git clone https://github.com/Azamat491/Sellers-Place /opt/sellers-place
+cd /opt/sellers-place
+sudo bash deploy/install.sh
+```
+Репозиторий приватный: на запрос пароля git введите GitHub-токен
+(GitHub → Settings → Developer settings → Personal access tokens → Fine-grained, доступ Contents: Read к этому репозиторию).
+
+Установщик спросит токен бота, домен (Enter — бесплатный адрес вида `1-2-3-4.sslip.io` с HTTPS) и @username админов
+(Enter — `ranjiroakim`). Он ставит Node.js и Caddy, получает HTTPS-сертификат и запускает приложение как службу,
+которая сама поднимается после перезагрузки.
+
+**6. Админ** (@ranjiroakim) открывает бота и нажимает `/start` — бот ответит «Вы администратор». С этого момента
+объявления на модерацию приходят ему. Других админов добавляйте в `ADMIN_USERNAMES` в `/opt/sellers-place/.env`
+(через запятую) и перезапускайте: `systemctl restart sellers-place`.
+
+**7. Проверка.** Откройте бота → кнопка «Маркет» слева от поля ввода откроет мини-апп.
+
+**8. Канал.** Закрепите пост со ссылкой на бота `https://t.me/<username_бота>`. Для прямой ссылки на приложение
+создайте Mini App в @BotFather (`/newapp`, адрес — из шага 5), тогда ссылка будет `https://t.me/<бот>/<app>`;
+на конкретную вещь — `?startapp=item_<id>`, сразу на форму продажи — `?startapp=sell`.
+
+**Обслуживание**
+- логи: `journalctl -u sellers-place -f`
+- обновление до новой версии: `cd /opt/sellers-place && sudo bash deploy/update.sh`
+- настройки: `/opt/sellers-place/.env`, после правки — `systemctl restart sellers-place`
+- резервная копия: папка `/opt/sellers-place/data` (база и фото)
+
+Альтернатива — Docker: `docker build -t sellers-place . && docker run -d --env-file .env -p 3000:3000 -v sellers-data:/data sellers-place`
+(HTTPS тогда настраивается отдельно).

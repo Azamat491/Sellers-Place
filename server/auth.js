@@ -29,6 +29,11 @@ export function validateInitData(initData, botToken) {
   }
 }
 
+export function isAdminUser(u) {
+  if (!u) return false;
+  return config.adminIds.includes(u.id) || (!!u.username && config.adminUsernames.includes(u.username.toLowerCase()));
+}
+
 export function authMiddleware(req, res, next) {
   const initData = req.get('X-Telegram-Init-Data') || '';
   let tgUser = validateInitData(initData, config.botToken);
@@ -39,6 +44,7 @@ export function authMiddleware(req, res, next) {
   const user = upsertUser(tgUser);
   if (user.banned) return res.status(403).json({ error: 'Доступ ограничен администрацией' });
   req.user = user;
-  req.isAdmin = config.adminIds.includes(user.id) || (config.devMode && config.adminIds.length === 0);
+  const noAdmins = !config.adminIds.length && !config.adminUsernames.length;
+  req.isAdmin = isAdminUser(user) || (config.devMode && noAdmins);
   next();
 }
