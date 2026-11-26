@@ -1,12 +1,9 @@
-import { CATEGORIES } from './catalog.js';
 import { config } from './config.js';
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 export const formatPrice = (n) =>
   n == null || n === '' ? '' : `${String(Math.round(Number(n))).replace(/\B(?=(\d{3})+(?!\d))/g, '.')} ₽`;
-
-const brandTag = (brand) => brand.replace(/[^\p{L}\p{N}]+/gu, '');
 
 function contactLine(l, role) {
   if (l.username) return `${role} - @${esc(l.username)}`;
@@ -15,7 +12,6 @@ function contactLine(l, role) {
 
 /** Текст поста в стиле канала SELLERS PLACE (HTML parse mode, лимит подписи 1024) */
 export function formatPost(l) {
-  const cat = CATEGORIES.find((c) => c.id === l.category);
   const title = [l.brand, l.model].filter(Boolean).map(esc).join(' | ');
   const lines = [];
 
@@ -40,8 +36,6 @@ export function formatPost(l) {
   const footer = [];
   if (deal.length) footer.push('', deal.join(' / '));
   footer.push('', contactLine(l, l.kind === 'wtb' ? 'Покупатель' : 'Продавец'));
-  const tags = [l.kind === 'wtb' ? '#поиск' : '#продажа', cat ? `#${cat.tag}` : '', `#${brandTag(l.brand)}`];
-  footer.push('', tags.filter((t) => t.length > 1).join(' '));
   if (l.status === 'sold') footer.unshift('', '<b>❌ ПРОДАНО</b>');
 
   let head = lines.join('\n');

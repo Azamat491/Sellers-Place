@@ -10,6 +10,30 @@ const price = (n) => (n == null ? '' : `${String(n).replace(/\B(?=(\d{3})+(?!\d)
 const haptic = (t = 'light') => tg?.HapticFeedback?.impactOccurred(t);
 const photoUrl = (p) => `/uploads/${encodeURIComponent(p)}`;
 
+// ---------- Тема: по умолчанию как в Telegram, кнопка ◐ переключает и запоминает ----------
+const THEME_KEY = 'sp_theme';
+const savedTheme = () => {
+  try { return localStorage.getItem(THEME_KEY); } catch { return null; }
+};
+const currentTheme = () =>
+  document.documentElement.dataset.theme || tg?.colorScheme ||
+  (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+function applyTheme(theme, remember) {
+  if (theme) document.documentElement.dataset.theme = theme;
+  if (remember) {
+    try { localStorage.setItem(THEME_KEY, theme); } catch {}
+  }
+  const btn = document.getElementById('themeBtn');
+  if (btn) btn.textContent = currentTheme() === 'dark' ? '☀\uFE0E' : '☾\uFE0E';
+  const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+  try {
+    tg?.setHeaderColor?.(bg);
+    tg?.setBackgroundColor?.(bg);
+    tg?.setBottomBarColor?.(bg);
+  } catch {}
+}
+applyTheme(savedTheme());
+
 let META = null;
 let navSeq = 0; // растёт при каждой навигации — отсекает устаревшие асинхронные рендеры
 const state = { tab: 'feed', stack: [], filters: { q: '', category: '', size: '', city: '', min: '', max: '', sort: 'new' } };
@@ -84,6 +108,10 @@ function updateBack() {
 tg?.BackButton?.onClick(back);
 $('#backBtn').onclick = back;
 $('#rulesBtn').onclick = () => push(renderRules);
+$('#themeBtn').onclick = () => {
+  haptic();
+  applyTheme(currentTheme() === 'dark' ? 'light' : 'dark', true);
+};
 document.querySelectorAll('.tabbar button').forEach((b) => (b.onclick = () => (haptic(), go(b.dataset.tab))));
 
 // ---------- Карточки ----------
@@ -274,7 +302,6 @@ async function renderDetail(id) {
     <div class="btns">
       ${!l.is_mine && contact ? `<button class="btn" id="write">Написать ${l.kind === 'wtb' ? 'покупателю' : 'продавцу'} @${esc(l.username)}</button>` : ''}
       ${!l.is_mine && !contact ? `<div class="notice">У автора нет @username — свяжитесь через пост в канале</div>` : ''}
-      ${l.garant && !l.is_mine && l.kind === 'sell' ? `<button class="btn secondary" id="garant">🛡 Сделка через гаранта (3%)</button>` : ''}
       <div class="btns two" style="margin-top:0">
         <button class="btn secondary" id="fav">${l.is_favorite ? '♥ В избранном' : '♡ В избранное'}</button>
         <button class="btn secondary" id="share">↗ Поделиться</button>
@@ -285,7 +312,6 @@ async function renderDetail(id) {
   const gal = $('#gal');
   if (gal && $('#dots')) gal.onscroll = () => ($('#dots').textContent = `${Math.round(gal.scrollLeft / gal.clientWidth) + 1} / ${l.photos.length}`);
   $('#write') && ($('#write').onclick = () => openLink(contact));
-  $('#garant') && ($('#garant').onclick = () => openLink(`https://t.me/${META.garantContact}`));
   $('#post') && ($('#post').onclick = () => openLink(l.post_url));
   $('#fav').onclick = async () => {
     haptic();
@@ -538,9 +564,6 @@ function previewText(v) {
   if (deal.length) L.push('', deal.join(' / '));
   const who = META.user.username ? `@${META.user.username}` : META.user.first_name;
   L.push('', `${v.kind === 'wtb' ? 'Покупатель' : 'Продавец'} - ${who}`);
-  const cat = META.categories.find((c) => c.id === v.category);
-  const brandTag = v.brand.replace(/[^\p{L}\p{N}]+/gu, '');
-  L.push('', [v.kind === 'wtb' ? '#поиск' : '#продажа', cat && `#${cat.tag}`, brandTag && `#${brandTag}`].filter(Boolean).join(' '));
   return L.join('\n');
 }
 
