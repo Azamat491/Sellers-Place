@@ -10,7 +10,7 @@ export const config = {
   botToken: process.env.BOT_TOKEN || '',
   // @username канала или числовой id (-100...). Бот должен быть админом канала.
   channelId: process.env.CHANNEL_ID || '@sellersplace2',
-  channelUsername: process.env.CHANNEL_USERNAME || 'sellersplace2',
+  channelUsername: (process.env.CHANNEL_USERNAME ?? 'sellersplace2').replace(/^@/, ''),
   // Telegram user id администраторов (модерация), через запятую
   adminIds: list(process.env.ADMIN_IDS).map(Number),
   // Или проще — @username администраторов через запятую. Админ должен один раз нажать /start в боте,

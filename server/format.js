@@ -56,5 +56,10 @@ export function formatPost(l) {
   return (head + desc + '\n' + tail).replace(/\n{3,}/g, '\n\n');
 }
 
-export const channelPostUrl = (messageId) =>
-  messageId ? `https://t.me/${config.channelUsername}/${messageId}` : null;
+export const channelPostUrl = (messageId) => {
+  if (!messageId) return null;
+  if (config.channelUsername) return `https://t.me/${config.channelUsername}/${messageId}`;
+  // Закрытый канал: CHANNEL_ID вида -1001234567890 → ссылка t.me/c/1234567890/<id>
+  const internal = String(config.channelId).replace(/^-100/, '');
+  return `https://t.me/c/${internal}/${messageId}`;
+};

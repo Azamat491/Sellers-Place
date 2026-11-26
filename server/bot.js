@@ -191,6 +191,17 @@ export function setupBot() {
     await next();
   });
 
+  // Когда бота делают админом канала — подсказываем CHANNEL_ID (нужен для закрытых каналов)
+  bot.on('my_chat_member', async (ctx) => {
+    const chat = ctx.chat;
+    const status = ctx.myChatMember.new_chat_member.status;
+    if (chat.type !== 'channel') return;
+    console.log(`Канал «${chat.title}» (${chat.username ? '@' + chat.username : 'закрытый'}), id ${chat.id}: бот теперь ${status}`);
+    if (status === 'administrator' && ctx.from && !ctx.from.is_bot) {
+      await notifyUser(ctx.from.id, `Бот добавлен админом в канал «${esc(chat.title)}».\nCHANNEL_ID=<code>${chat.id}</code>`);
+    }
+  });
+
   bot.command('id', (ctx) => ctx.reply(`Ваш Telegram id: <code>${ctx.from.id}</code>`, { parse_mode: 'HTML' }));
 
   bot.command('start', async (ctx) => {
